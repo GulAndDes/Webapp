@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        p {
+            font-size: 18px;
+            color: #555;
+        }
+
+        #bet-container {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        #bet-form input[type="number"] {
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            width: 200px;
+            margin-right: 10px;
+        }
+
+        #bet-form button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            background-color: #28a745;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        #bet-form button:hover {
+            background-color: #218838;
+        }
+
+        #gameCanvas {
+            border: 2px solid #333;
+            background-color: #fff;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            display: none;
+            margin-bottom: 20px;
+        }
+
+        #restart-btn {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            background-color: #dc3545;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            display: none;
+        }
+
+        #restart-btn:hover {
+            background-color: #c82333;
+        }
+
+        #scoreboard {
+            font-size: 20px;
+            color: #555;
+            margin-top: 10px;
+        }
+
+        #timer {
+            font-size: 24px;
+            color: #555;
+            margin-top: 20px;
+        }
+
+        #records {
+            margin-top: 20px;
+            display: none;
+        }
+
+        #records table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        #records th, #records td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+
+        #records th {
+            background-color: #f4f4f4;
+            color: #333;
+        }
+
+        #winner-popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 20px;
+            background-color: #fff;
+            border: 2px solid #333;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            display: none;
+            z-index: 1000;
+        }
+
+        #winner-popup h2 {
+            margin: 0;
+            color: #333;
+        }
+
+        #winner-popup button {
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        #winner-popup button:hover {
+            background-color: #0056b3;
+        }
+
+        #overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+    <h1>Welcome, {{ username }}!</h1>
+    <p>Your current coin balance: <span id="coin-balance">{{ coins }}</span></p>
+    <p>Global Bank: <span id="global-bank">{{ global_bank }}</span></p>
+
+    <div id="bet-container">
+        <form id="bet-form">
+            <input type="number" name="bet" id="bet-amount" placeholder="Enter your bet">
+            <input type="hidden" name="username" value="{{ username }}">
+            <button type="submit">Place Bet</button>
+        </form>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="200"></canvas>
+    <button id="restart-btn">Restart Game for Bet</button>
+
+    <div id="scoreboard">Score: <span id="score">0</span></div>
+    <div id="timer">Time left: <span id="timer-value">--</span> seconds</div>
+
+    <div id="records">
+        <h2>High Scores</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Score</th>
+                </tr>
+            </thead>
+            <tbody id="records-body">
+                <!-- Records will be inserted here -->
+            </tbody>
+        </table>
+    </div>
+
+    <div id="overlay"></div>
+    <div id="winner-popup">
+        <h2>Congratulations, <span id="winner-name"></span>!</h2>
+        <button onclick="hideWinnerPopup()">OK</button>
+    </div>
+
+    <script>
+        let timerInterval;
+        let canvas, ctx, dino, obstacles, score, isGameOver, gameSpeed;
+        const gravity = 0.5;  // Define gravity constant
+    
+        document.getElementById('bet-form').onsubmit = async function (event) {
+            event.preventDefault();
+            
+            const betAmount = document.getElementById('bet-amount').value;
+            const username = "{{ username }}";
+            
+            const response = await fetch('/place_bet', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    username: username,
+                    bet: betAmount
+                })
+            });
+    
+            const result = await response.json();
+    
+            if (result.success) {
+                document.getElementById('coin-balance').textContent = result.coinBalance;
+                document.getElementById('global-bank').textContent = result.globalBank;
+    
+                // Hide bet form and show game
+                document.getElementById('bet-container').style.display = 'none';
+                document.getElementById('gameCanvas').style.display = 'block';
+                document.getElementById('records').style.display = 'block'; // Show high scores table
+                startGame();
+                startTimer(); // Start the timer
+            } else {
+                alert(result.message);
+            }
+        };
+    
+        document.getElementById('restart-btn').onclick = function() {
+            resetGame();
+        };
+    
+        function startGame() {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            dino = new Dino();
+            obstacles = [];
+            score = 0;
+            isGameOver = false;
+            gameSpeed = 3;
+    
+            document.addEventListener('keydown', handleKeyPress);
+            requestAnimationFrame(updateGame);
+        }
+    
+        function updateGame() {
+            if (isGameOver) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+            if (Math.random() < 0.02) {
+                obstacles.push(new Obstacle());
+            }
+    
+            dino.update();
+            dino.draw();
+    
+            obstacles = obstacles.filter(obstacle => {
+                obstacle.update();
+                obstacle.draw();
+    
+                if (obstacle.collidesWith(dino)) {
+                    endGame();
+                    return false;
+                }
+    
+                return obstacle.x > -obstacle.width;
+            });
+    
+            score++;
+            document.getElementById('score').textContent = score;
+    
+            requestAnimationFrame(updateGame);
+        }
+    
+        function endGame() {
+            if (isGameOver) return;
+            isGameOver = true;
+            ctx.font = '50px Arial';
+            ctx.fillStyle = '#dc3545';
+            ctx.fillText('Game Over', canvas.width / 2 - 150, canvas.height / 2);
+            ctx.font = '20px Arial';
+            ctx.fillStyle = '#555';
+            ctx.fillText(`Final Score: ${score}`, canvas.width / 2 - 70, canvas.height / 2 + 50);
+    
+            document.getElementById('restart-btn').style.display = 'block';
+    
+            fetch('/update_score', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    username: "{{ username }}",
+                    score: score
+                })
+            }).then(() => {
+                fetch('/get_high_scores')
+                    .then(response => response.json())
+                    .then(data => {
+                        const tbody = document.getElementById('records-body');
+                        tbody.innerHTML = '';
+    
+                        let isTopScorer = false;
+    
+                        if (data.scores.length > 0) {
+                            data.scores.forEach((record, index) => {
+                                const row = document.createElement('tr');
+                                row.innerHTML = `<td>${record.username}</td><td>${record.score}</td>`;
+                                tbody.appendChild(row);
+    
+                                if (record.username === "{{ username }}" && index === 0) {
+                                    isTopScorer = true;
+                                }
+                            });
+                        }
+    
+                        if (isTopScorer) {
+                            document.getElementById('winner-name').textContent = "{{ username }}";
+                            document.getElementById('winner-popup').style.display = 'block';
+                            document.getElementById('overlay').style.display = 'block';
+    
+                            setTimeout(() => {
+                                hideWinnerPopup();
+                            }, 5000);
+                        } else {
+                            resetGame(); // Ensure the game is reset properly
+                        }
+                    });
+            });
+        }
+    
+        function startTimer() {
+            fetch('/get_timer')
+                .then(response => response.json())
+                .then(data => {
+                    let timeLeft = data.timeLeft;
+                    document.getElementById('timer').style.display = 'block'; // Ensure the timer is visible
+                    document.getElementById('timer-value').textContent = timeLeft;
+    
+                    timerInterval = setInterval(function() {
+                        timeLeft--;
+                        document.getElementById('timer-value').textContent = timeLeft;
+    
+                        if (timeLeft <= 0) {
+                            clearInterval(timerInterval);
+                            endGame(); // End the game if the timer runs out
+                            
+                            fetch('/get_high_scores')
+                                .then(response => response.json())
+                                .then(data => {
+                                    const tbody = document.getElementById('records-body');
+                                    tbody.innerHTML = '';
+    
+                                    if (data.scores.length > 0) {
+                                        const topScore = data.scores[0].score;
+                                        const topScorers = data.scores.filter(record => record.score === topScore);
+                                        const winnerName = topScorers.map(record => record.username).join(', ');
+    
+                                        topScorers.forEach(record => {
+                                            const row = document.createElement('tr');
+                                            row.innerHTML = `<td>${record.username}</td><td>${record.score}</td>`;
+                                            tbody.appendChild(row);
+                                        });
+    
+                                        document.getElementById('winner-name').textContent = winnerName;
+                                        document.getElementById('winner-popup').style.display = 'block';
+                                        document.getElementById('overlay').style.display = 'block';
+    
+                                        setTimeout(() => {
+                                            hideWinnerPopup();
+                                        }, 5000);
+                                    } else {
+                                        resetGame(); // Ensure the game is reset properly
+                                    }
+                                });
+                        }
+                    }, 1000);
+                });
+        }
+    
+        function hideWinnerPopup() {
+            document.getElementById('winner-popup').style.display = 'none';
+            document.getElementById('overlay').style.display = 'none';
+            resetGame(); // Reset the game state after closing the pop-up
+        }
+    
+        function resetGame() {
+            // Hide game elements
+            document.getElementById('bet-container').style.display = 'block';
+            document.getElementById('restart-btn').style.display = 'none';
+            document.getElementById('gameCanvas').style.display = 'none';
+            document.getElementById('scoreboard').style.display = 'none';
+            document.getElementById('records').style.display = 'none';
+            document.getElementById('timer').style.display = 'none';
+            document.getElementById('timer-value').textContent = '--';
+    
+            // Clear the game canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+            // Reset variables
+            score = 0;
+            isGameOver = false;
+            gameSpeed = 3;
+            obstacles = [];
+    
+            // Remove any event listeners that might cause issues
+            document.removeEventListener('keydown', handleKeyPress);
+    
+            // Clear any existing timers to avoid multiple instances running
+            if (timerInterval) {
+                clearInterval(timerInterval);
+            }
+    
+            // Clear the pop-up and overlay
+            hideWinnerPopup();
+    
+            // Reset game state on the server
+            fetch('/reset_game', {
+                method: 'POST'
+            }).then(() => {
+                // Re-enable the keydown event listener after reset
+                document.addEventListener('keydown', handleKeyPress);
+            });
+        }
+    
+        // Separate keypress handler function
+        function handleKeyPress(event) {
+            if (event.code === 'Space' && !isGameOver) {
+                dino.jump();
+            }
+        }
+    
+        // Ensure the keypress handler is added when the game starts
+        document.addEventListener('keydown', handleKeyPress);
+    
+        // Dino class remains the same
+        class Dino {
+            constructor() {
+                this.width = 50;
+                this.height = 50;
+                this.x = 50;
+                this.y = canvas.height - this.height;
+                this.yVelocity = 0;
+                this.jumping = false;
+            }
+    
+            draw() {
+                ctx.fillStyle = 'green';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+    
+            update() {
+                if (this.jumping) {
+                    this.yVelocity += gravity;
+                    this.y += this.yVelocity;
+    
+                    if (this.y > canvas.height - this.height) {
+                        this.y = canvas.height - this.height;
+                        this.jumping = false;
+                        this.yVelocity = 0;
+                    }
+                }
+            }
+    
+            jump() {
+                if (!this.jumping && this.y === canvas.height - this.height) {
+                    this.yVelocity = -10;
+                    this.jumping = true;
+                }
+            }
+        }
+    
+        class Obstacle {
+            constructor() {
+                this.width = 20;
+                this.height = 20;
+                this.x = canvas.width;
+                this.y = canvas.height - this.height;
+            }
+    
+            draw() {
+                ctx.fillStyle = 'red';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+    
+            update() {
+                this.x -= gameSpeed;
+            }
+    
+            collidesWith(dino) {
+                return !(dino.x + dino.width < this.x || 
+                         dino.x > this.x + this.width || 
+                         dino.y + dino.height < this.y || 
+                         dino.y > this.y + this.height);
+            }
+        }
+    </script>
+    
+    
+</body>
+</html>
